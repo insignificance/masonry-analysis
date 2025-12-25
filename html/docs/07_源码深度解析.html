@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>07_Masonry 源码深度解析 - Masonry 深度分析</title>
+    <meta name="description" content="07_源码深度解析">
+    <link rel="stylesheet" href="../assets/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="../assets/js/navigation.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            if (typeof mermaid !== 'undefined') {
+                mermaid.initialize({
+                    startOnLoad: true,
+                    theme: 'default',
+                    securityLevel: 'loose',
+                    flowchart: { useMaxWidth: true, htmlLabels: true },
+                    sequence: { useMaxWidth: true }
+                });
+            }
+        });
+    </script>
+</head>
+<body>
+    <nav id="floating-toc" class="floating-toc">
+        <div class="toc-header">📚 目录</div>
+        <div id="toc-content"></div>
+    </nav>
+
+    <main class="content-area">
+        <article>
+            <h2>🎯 本章目标</h2>
+<ul>
+<li>逐行解析核心源码实现</li>
+<li>理解关键算法的设计思路</li>
+<li>学习高质量代码的编写技巧</li>
+<li>掌握可扩展架构的设计方法</li></ul>
+<hr>
+<h2>📊 源码结构概览</h2>
+<div class="mermaid">
+mindmap
+  root((源码结构))
+    "Masonry.h"
+      "核心头文件"
+      "统一导入"
+    "核心实现"
+      "MASConstraintMaker.m"
+        "工厂逻辑"
+        "安装流程"
+      "MASConstraint.m"
+        "抽象基类"
+        "链式API"
+      "MASViewConstraint.m"
+        "单约束实现"
+        "NSLConstraint包装"
+      "MASCompositeConstraint.m"
+        "复合约束"
+        "子约束管理"
+    "基础类"
+      "MASViewAttribute.m"
+        "属性封装"
+        "适配逻辑"
+      "MASUtilities.m"
+        "跨平台宏"
+        "工具函数"
+    "扩展"
+      "View+MASAdditions.m"
+        "Category入口"
+      "NSArray+MASAdditions.m"
+        "批量操作"
+    "工具"
+      "MASLayoutConstraint.m"
+        "自定义约束"
+      "NSLayoutConstraint+MASDebugAdditions.m"
+        "调试增强"</div>
+<hr>
+<h2>🔍 MASConstraintMaker.m 深度解析</h2>
+<h3>1. 初始化过程</h3>
+<div class="code-block"><pre><code class="language-objective-c">// MASConstraintMaker.m:25
+- (id)initWithView:(MAS_VIEW *)view {
+    self = [super init];
+    if (!self) return nil;
+
+    self.view = view;
+    self.constraints = NSMutableArray.new;
+
+    return self;
+}</code></pre></div>
+<ul>
+<li>✅ <strong>弱引用视图</strong>：<code>@property (nonatomic, weak) MAS_VIEW *view;</code></li>
+<p><strong>设计要点</strong>：</p></ul>  - 避免循环引用：View → Maker → View
+<p>- Maker生命周期由用户Block控制</p>
+<ul>
+<li>✅ <strong>惰性初始化数组</strong>：使用 <code>NSMutableArray.new</code> 而非懒加载</li></ul>  - 简化代码，无额外开销
+<p>- 确保每次创建都是干净状态</p>
+<h3>2. 安装流程详解</h3>
+<div class="code-block"><pre><code class="language-objective-c">// MASConstraintMaker.m:35
+- (NSArray *)install {
+    // 1. 处理重做模式
+    if (self.removeExisting) {
+        NSArray *installedConstraints = [MASViewConstraint installedConstraintsForView:self.view];
+        for (MASConstraint *constraint in installedConstraints) {
+            [constraint uninstall];
+        }
+    }
+
+    // 2. 防御性复制
+    NSArray *constraints = self.constraints.copy;
+
+    // 3. 批量安装
+    for (MASConstraint *constraint in constraints) {
+        constraint.updateExisting = self.updateExisting;
+        [constraint install];
+    }
+
+    // 4. 清理现场
+    [self.constraints removeAllObjects];
+
+    return constraints;
+}</code></pre></div>
+<p><strong>关键设计</strong>：</p>
+<div class="mermaid">
+flowchart TD
+    A[install] --> B{removeExisting?}
+    B -->|是| C["卸载旧约束"]
+    B -->|否| D["跳过"]
+    C --> E["复制数组"]
+    D --> E
+    E --> F["遍历安装"]
+    F --> G["设置update标志"]
+    G --> H["调用install"]
+    H --> I["清空数组"]
+    I --> J["返回约束"]</div>
+<p><strong>防御性复制的意义</strong>：</p>
+<div class="code-block"><pre><code class="language-objective-c">// ❌ 危险：直接遍历
+for (MASConstraint *constraint in self.constraints) {
+    [constraint install];
+    // 如果constraint.install内部修改了self.constraints，会导致崩溃
+}
+
+// ✅ 安全：先复制
+NSArray *constraints = self.constraints.copy;  // 创建不可变副本
+for (MASConstraint *constraint in constraints) {
+    [constraint install];  // 安全遍历
+}</code></pre></div>
+<h3>3. 代理方法实现</h3>
+<div class="code-block"><pre><code class="language-objective-c">// MASConstraintMaker.m:53
+- (void)constraint:(MASConstraint *)constraint
+    shouldBeReplacedWithConstraint:(MASConstraint *)replacementConstraint {
+
+    NSUInteger index = [self.constraints indexOfObject:constraint];
+    NSAssert(index != NSNotFound, @"Could not find constraint %@", constraint);
+
+    [self.constraints replaceObjectAtIndex:index withObject:replacementConstraint];
+}</code></pre></div>
+<p><strong>使用场景</strong>：</p>
+<div class="mermaid">
+sequenceDiagram
+    participant Maker
+    participant Single as MASViewConstraint
+    participant Composite as MASCompositeConstraint
+
+    Maker->>Single: 创建单约束
+    Single->>Maker: 返回约束
+
+    Maker->>Single: 添加第二个属性
+    Single->>Maker: 请求替换
+    Maker->>Composite: 创建复合约束
+    Maker->>Maker: 替换数组中的单约束
+
+    Note over Maker: 现在数组中是Composite</div>
+<div class="code-block"><pre><code class="language-objective-c">// MASConstraintMaker.m:59
+- (MASConstraint *)constraint:(MASConstraint *)constraint
+    addConstraintWithLayoutAttribute:(NSLayoutAttribute)layoutAttribute {
+
+    // 创建新约束
+    MASViewAttribute *viewAttribute = [[MASViewAttribute alloc]
+                                       initWithView:self.view
+                                       layoutAttribute:layoutAttribute];
+    MASViewConstraint *newConstraint = [[MASViewConstraint alloc]
+                                        initWithFirstViewAttribute:viewAttribute];
+
+    // 单约束 → 复合约束的升级
+    if ([constraint isKindOfClass:MASViewConstraint.class]) {
+        NSArray *children = @[constraint, newConstraint];
+        MASCompositeConstraint *compositeConstraint = [[MASCompositeConstraint alloc]
+                                                       initWithChildren:children];
+        compositeConstraint.delegate = self;
+
+        // 通过代理替换
+        [self constraint:constraint shouldBeReplacedWithConstraint:compositeConstraint];
+        return compositeConstraint;
+    }
+
+    // 无约束时直接添加
+    if (!constraint) {
+        newConstraint.delegate = self;
+        [self.constraints addObject:newConstraint];
+    }
+
+    return newConstraint;
+}</code></pre></div>
+<p><strong>升级流程</strong>：</p>
+<div class="code-block"><pre><code>make.left → MASViewConstraint
+  ↓
+make.left.right → MASCompositeConstraint
+  ↓
+  包含: [MASViewConstraint(left), MASViewConstraint(right)]</code></pre></div>
+<hr>
+<h2>🔍 MASConstraint.m 深度解析</h2>
+<h3>1. 链式API的魔法</h3>
+<div class="code-block"><pre><code class="language-objective-c">// MASConstraint.m:25
+- (MASConstraint * (^)(MASEdgeInsets))insets {
+    return ^id(MASEdgeInsets insets) {
+        // 子类实现具体逻辑
+        return self;  // 关键：返回self实现链式
+    };
+}</code></pre></div>
+<p><strong>为什么能链式调用？</strong></p>
+<div class="code-block"><pre><code class="language-objective-c">// 执行过程
+make.left.equalTo(superview).offset(10).priorityHigh();
+
+// 1. make.left → 返回MASViewConstraint实例
+// 2. .equalTo(superview) → 配置，返回self（同一个实例）
+// 3. .offset(10) → 配置，返回self
+// 4. .priorityHigh() → 配置，返回self
+// 5. 结束 → self被丢弃，约束已配置完成</code></pre></div>
+<h3>2. 抽象与多态</h3>
+<div class="code-block"><pre><code class="language-objective-c">// MASConstraint.m:209
+- (void)install {
+    // 抛出异常，强制子类实现
+    [NSException raise:NSInternalInconsistencyException
+                format:@"You must override %@ in a subclass", NSStringFromSelector(_cmd)];
+}
+
+// MASConstraint.m:214
+- (void)uninstall {
+    [NSException raise:NSInternalInconsistencyException
+                format:@"You must override %@ in a subclass", NSStringFromSelector(_cmd)];
+}</code></pre></div>
+<p><strong>多态的优势</strong>：</p>
+<div class="code-block"><pre><code class="language-objective-c">// 客户端代码无需知道具体类型
+MASConstraint *constraint = make.left;  // 可能是View或Composite
+
+// 统一接口调用
+[constraint install];  // 自动调用正确的实现</code></pre></div>
+<h3>3. 自动装箱支持</h3>
+<div class="code-block"><pre><code class="language-objective-c">// MASConstraint.m:235
+#define mas_equalTo(...)                 equalTo(MASBoxValue((__VA_ARGS__)))
+#define mas_offset(...)                  valueOffset(MASBoxValue((__VA_ARGS__)))
+
+// MASConstraint.m:253
+- (MASConstraint * (^)(id))mas_equalTo {
+    return ^id(id attr) {
+        return self.equalTo(attr);
+    };
+}</code></pre></div>
+<p><strong>MASBoxValue 宏解析</strong>：</p>
+<div class="code-block"><pre><code class="language-objective-c">// MASUtilities.m:76
+static inline id _MASBoxValue(const char *type, ...) {
+    va_list v;
+    va_start(v, type);
+    id obj = nil;
+
+    if (strcmp(type, @encode(id)) == 0) {
+        id actual = va_arg(v, id);
+        obj = actual;
+    } else if (strcmp(type, @encode(CGPoint)) == 0) {
+        CGPoint actual = (CGPoint)va_arg(v, CGPoint);
+        obj = [NSValue value:&actual withObjCType:type];
+    } else if (strcmp(type, @encode(CGSize)) == 0) {
+        // ... 其他类型
+    }
+
+    va_end(v);
+    return obj;
+}</code></pre></div>
+<p><strong>使用示例</strong>：</p>
+<div class="code-block"><pre><code class="language-objective-c">// 用户代码
+make.width.mas_equalTo(100);
+make.size.mas_equalTo(CGSizeMake(100, 200));
+
+// 展开后
+make.width.equalTo(MASBoxValue(100));
+make.size.equalTo(MASBoxValue(CGSizeMake(100, 200)));
+
+// MASBoxValue返回
+// 100 → NSNumber
+// CGSize → NSValue</code></pre></div>
+<hr>
+<h2>🔍 MASViewConstraint.m 深度解析</h2>
+<h3>1. 约束相等性判断</h3>
+<div class="code-block"><pre><code class="language-objective-c">// MASViewConstraint.m:100
+- (BOOL)isEqualToConstraint:(MASViewConstraint *)constraint {
+    if (!constraint) return NO;
+    if (self == constraint) return YES;
+
+    // 比较第一个视图属性
+    if (self.firstViewAttribute != constraint.firstViewAttribute) {
+        return NO;
+    }
+
+    // 比较第二个视图属性
+    if (self.secondViewAttribute != constraint.secondViewAttribute) {
+        return NO;
+    }
+
+    // 比较布局属性
+    if (self.firstViewAttribute.layoutAttribute != constraint.firstViewAttribute.layoutAttribute) {
+        return NO;
+    }
+
+    return YES;
+}</code></pre></div>
+<p><strong>为什么这样比较？</strong></p>
+<div class="mermaid">
+flowchart TD
+    A["两个MASViewConstraint"] --> B{"相等?"}
+    B --> C["比较firstViewAttribute"]
+    C --> D["比较secondViewAttribute"]
+    D --> E["比较layoutAttribute"]
+    E --> F["返回结果"]
+
+    subgraph "指针比较"
+        C --> G["地址相同?"]
+        D --> H["地址相同?"]
+    end</div>
+<p><strong>指针比较的含义</strong>：</p>
+<div class="code-block"><pre><code class="language-objective-c">// 相同视图属性
+MASViewAttribute *attr1 = view.mas_left;
+MASViewAttribute *attr2 = view.mas_left;
+
+// attr1 == attr2 为YES，因为：
+// 1. View+MASAdditions.m 中使用了懒加载或缓存
+// 2. 同一视图的同一属性返回同一个对象</code></pre></div>
+<h3>2. 创建NSLayoutConstraint</h3>
+<div class="code-block"><pre><code class="language-objective-c">// MASViewConstraint.m:150
+- (NSLayoutConstraint *)createLayoutConstraint {
+    id firstItem = self.firstViewAttribute.item;
+    id secondItem = self.secondViewAttribute.item;
+
+    // 处理常量值（无secondItem）
+    if ([secondItem isKindOfClass:NSValue.class]) {
+        secondItem = nil;
+        self.secondViewAttribute = [[MASViewAttribute alloc]
+                                   initWithView:nil
+                                   item:nil
+                                   layoutAttribute:NSLayoutAttributeNotAnAttribute];
+    }
+
+    return [NSLayoutConstraint constraintWithItem:firstItem
+                                      attribute:self.firstViewAttribute.layoutAttribute
+                                      relatedBy:self.layoutRelation
+                                         toItem:secondItem
+                                      attribute:self.secondViewAttribute.layoutAttribute
+                                     multiplier:self.layoutMultiplier
+                                       constant:self.layoutConstant];
+}</code></pre></div>
+<p><strong>约束方程</strong>：</p>
+<div class="code-block"><pre><code>firstItem.firstAttribute = secondItem.secondAttribute * multiplier + constant</code></pre></div>
+<p><strong>示例解析</strong>：</p>
+<div class="code-block"><pre><code class="language-objective-c">// 代码
+make.left.equalTo(superview).offset(10).multipliedBy(1.0);
+
+// 生成的NSLayoutConstraint
+// firstItem: view
+// firstAttribute: NSLayoutAttributeLeft
+// relatedBy: NSLayoutRelationEqual
+// toItem: superview
+// secondAttribute: NSLayoutAttributeLeft
+// multiplier: 1.0
+// constant: 10
+
+// 等价于：view.left = superview.left * 1.0 + 10</code></pre></div>
+<h3>3. 查找最近公共父视图</h3>
+<div class="code-block"><pre><code class="language-objective-c">// MASViewConstraint.m:180
+- (instancetype)mas_closestCommonSuperview:(MAS_VIEW *)view {
+    MAS_VIEW *closestCommonSuperview = nil;
+    MAS_VIEW *secondViewSuperview = view;
+
+    while (!closestCommonSuperview && secondViewSuperview) {
+        MAS_VIEW *firstViewSuperview = self;
+        while (!closestCommonSuperview && firstViewSuperview) {
+            if (secondViewSuperview == firstViewSuperview) {
+                closestCommonSuperview = secondViewSuperview;
+            }
+            firstViewSuperview = firstViewSuperview.superview;
+        }
+        secondViewSuperview = secondViewSuperview.superview;
+    }
+
+    return closestCommonSuperview;
+}</code></pre></div>
+<p><strong>算法分析</strong>：</p>
+<div class="mermaid">
+flowchart TD
+    A[view1] --> B[view2]
+    B --> C{"公共父视图?"}
+    C -->|有| D["返回"]
+    C -->|无| E["遍历view1父级"]
+    E --> F["遍历view2父级"]
+    F --> G{"找到相同?"}
+    G -->|是| H["返回"]
+    G -->|否| I["继续遍历"]</div>
+<p><strong>时间复杂度</strong>：O(h₁ × h₂)，h为视图层级深度</p>
+<p><strong>为什么需要这个？</strong></p>
+<div class="code-block"><pre><code class="language-objective-c">// 场景
+[superview addSubview:view1];
+[superview addSubview:view2];
+
+[view1 mas_makeConstraints:^(MASConstraintMaker *make) {
+    make.width.equalTo(view2);  // 两个视图需要约束
+}];
+
+// NSLayoutConstraint要求两个视图必须有公共父视图
+// 必须找到superview作为约束容器</code></pre></div>
+<hr>
+<h2>🔍 MASCompositeConstraint.m 深度解析</h2>
+<h3>1. 子约束管理</h3>
+<div class="code-block"><pre><code class="language-objective-c">// MASCompositeConstraint.m:24
+- (id)initWithChildren:(NSArray *)children {
+    self = [super init];
+    if (!self) return nil;
+
+    _children = children.mutableCopy;
+
+    // 设置所有子约束的delegate
+    for (MASConstraint *child in children) {
+        if ([child respondsToSelector:@selector(setDelegate:)]) {
+            [child setValue:self forKey:@"delegate"];
+        }
+    }
+
+    return self;
+}</code></pre></div>
+<p><strong>委托链设计</strong>：</p>
+<div class="mermaid">
+flowchart TD
+    A["用户"] --> B[MASConstraintMaker]
+    B --> C[MASCompositeConstraint]
+    C --> D["MASViewConstraint 1"]
+    C --> E["MASViewConstraint 2"]
+    C --> F["MASViewConstraint 3"]
+
+    D --> C
+    E --> C
+    F --> C
+
+    C --> B</div>
+<h3>2. 操作转发</h3>
+<div class="code-block"><pre><code class="language-objective-c">// MASCompositeConstraint.m:35
+- (MASConstraint * (^)(id))equalTo {
+    return ^id(id attribute) {
+        for (MASConstraint *child in self.children) {
+            [child equalTo:attribute];
+        }
+        return self;
+    };
+}</code></pre></div>
+<p><strong>转发示例</strong>：</p>
+<div class="code-block"><pre><code class="language-objective-c">// 代码
+make.edges.equalTo(superview).insets(UIEdgeInsetsMake(10, 10, 10, 10));
+
+// 执行流程
+// 1. make.edges → Composite包含4个ViewConstraint
+// 2. .equalTo(superview)
+//    → Composite转发到4个child
+//    → 每个child设置secondViewAttribute
+// 3. .insets(...)
+//    → Composite特殊处理，遍历child设置不同offset
+//    → top: +10, left: +10, bottom: -10, right: -10</code></pre></div>
+<h3>3. 特殊配置处理</h3>
+<div class="code-block"><pre><code class="language-objective-c">// MASCompositeConstraint.m:100
+- (MASConstraint * (^)(MASEdgeInsets))insets {
+    return ^id(MASEdgeInsets insets) {
+        for (MASConstraint *child in self.children) {
+            if ([child isKindOfClass:MASViewConstraint.class]) {
+                MASViewConstraint *viewConstraint = (MASViewConstraint *)child;
+                NSLayoutAttribute attr = viewConstraint.firstViewAttribute.layoutAttribute;
+
+                switch (attr) {
+                    case NSLayoutAttributeTop:
+                        [child offset:insets.top];
+                        break;
+                    case NSLayoutAttributeLeft:
+                        [child offset:insets.left];
+                        break;
+                    case NSLayoutAttributeBottom:
+                        [child offset:-insets.bottom];  // 注意负号
+                        break;
+                    case NSLayoutAttributeRight:
+                        [child offset:-insets.right];   // 注意负号
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+        return self;
+    };
+}</code></pre></div>
+<p><strong>为什么bottom/right用负数？</strong></p>
+<div class="code-block"><pre><code class="language-objective-c">// Auto Layout坐标系
+// left/top: 正数向右/下
+// right/bottom: 正数向左/上
+
+// 想要边距10
+// left = superview.left + 10
+// right = superview.right - 10  ← 需要负数</code></pre></div>
+<hr>
+<h2>🔍 View+MASAdditions.m 深度解析</h2>
+<h3>1. 入口方法</h3>
+<div class="code-block"><pre><code class="language-objective-c">// View+MASAdditions.m:14
+- (NSArray *)mas_makeConstraints:(void(^)(MASConstraintMaker *))block {
+    self.translatesAutoresizingMaskIntoConstraints = NO;
+    MASConstraintMaker *constraintMaker = [[MASConstraintMaker alloc] initWithView:self];
+    block(constraintMaker);
+    return [constraintMaker install];
+}</code></pre></div>
+<p><strong>关键步骤</strong>：</p>
+<div class="mermaid">
+flowchart TD
+    A["调用入口"] --> B["关闭autoresizing"]
+    B --> C["创建ConstraintMaker"]
+    C --> D["执行用户Block"]
+    D --> E["安装约束"]
+    E --> F["返回约束数组"]
+
+    style B fill:#f9f,stroke:#333
+    style E fill:#bbf,stroke:#333</div>
+<p><strong>为什么要关闭autoresizing？</strong></p>
+<div class="code-block"><pre><code class="language-objective-c">// translatesAutoresizingMaskIntoConstraints = YES (默认)
+// 系统会自动将autoresizing mask转换为Auto Layout约束
+// 可能与手动添加的约束冲突
+
+// 设置为NO，完全由Auto Layout控制</code></pre></div>
+<h3>2. 属性访问器</h3>
+<div class="code-block"><pre><code class="language-objective-c">// View+MASAdditions.m:39
+- (MASViewAttribute *)mas_left {
+    return [[MASViewAttribute alloc] initWithView:self layoutAttribute:NSLayoutAttributeLeft];
+}</code></pre></div>
+<p><strong>设计选择</strong>：</p>
+<div class="code-block"><pre><code class="language-objective-c">// 为什么不缓存？
+// ❌ 缓存方案
+- (MASViewAttribute *)mas_left {
+    if (!_mas_left) {
+        _mas_left = [[MASViewAttribute alloc] initWithView:self layoutAttribute:NSLayoutAttributeLeft];
+    }
+    return _mas_left;
+}
+
+// ✅ 每次新建方案
+- (MASViewAttribute *)mas_left {
+    return [[MASViewAttribute alloc] initWithView:self layoutAttribute:NSLayoutAttributeLeft];
+}</code></pre></div>
+<ol>
+<li><strong>轻量级</strong>：MASViewAttribute很小，创建开销可忽略</li>
+<li><strong>无状态</strong>：每次调用都是独立的，不会相互影响</li>
+<li><strong>简单</strong>：无需管理缓存生命周期</li>
+<p><strong>原因</strong>：</p></ol>
+<hr>
+<h2>🔍 MASViewAttribute.m 深度解析</h2>
+<h3>1. 不可变设计</h3>
+<div class="code-block"><pre><code class="language-objective-c">// MASViewAttribute.h
+@interface MASViewAttribute : NSObject
+@property (nonatomic, weak, readonly) MAS_VIEW *view;
+@property (nonatomic, weak, readonly) id item;
+@property (nonatomic, assign, readonly) NSLayoutAttribute layoutAttribute;
+@end</code></pre></div>
+<ul>
+<li>✅ <strong>线程安全</strong>：不可变对象可安全共享</li>
+<li>✅ <strong>简单性</strong>：无需考虑状态变化</li>
+<li>✅ <strong>可预测</strong>：行为确定，易于理解</li>
+<p><strong>只读属性的好处</strong>：</p></ul>
+<h3>2. 支持Layout Guide</h3>
+<div class="code-block"><pre><code class="language-objective-c">// MASViewAttribute.m:35
+- (id)initWithView:(MAS_VIEW *)view item:(id)item layoutAttribute:(NSLayoutAttribute)layoutAttribute {
+    self = [super init];
+    if (!self) return nil;
+
+    _view = view;
+    _item = item;
+    _layoutAttribute = layoutAttribute;
+
+    return self;
+}</code></pre></div>
+<p><strong>item的作用</strong>：</p>
+<div class="code-block"><pre><code class="language-objective-c">// 普通视图
+MASViewAttribute *left = [[MASViewAttribute alloc] initWithView:view
+                                                          item:view
+                                               layoutAttribute:NSLayoutAttributeLeft];
+// item = view
+
+// 安全区域（iOS 11+）
+MASViewAttribute *safeTop = [[MASViewAttribute alloc] initWithView:view
+                                                              item:view.safeAreaLayoutGuide
+                                                   layoutAttribute:NSLayoutAttributeTop];
+// item = safeAreaLayoutGuide</code></pre></div>
+<hr>
+<h2>🎯 设计亮点解析</h2>
+<h3>1. 惰性求值</h3>
+<div class="code-block"><pre><code class="language-objective-c">// MASConstraintMaker.m
+- (MASConstraint *)left {
+    return [self addConstraintWithLayoutAttribute:NSLayoutAttributeLeft];
+}</code></pre></div>
+<ul>
+<li>只有在访问时才创建对象</li>
+<li>无需预分配内存</li>
+<li>按需创建，节省资源</li>
+<p><strong>优势</strong>：</p></ul>
+<h3>2. 委托链</h3>
+<div class="mermaid">
+flowchart TD
+    A["用户"] --> B[ConstraintMaker]
+    B --> C[Constraint]
+    C --> D[ViewAttribute]
+
+    C -->|delegate| B
+    B -->|delegate| 用户</div>
+<ul>
+<li>解耦：Constraint不知道ConstraintMaker的具体实现</li>
+<li>灵活：可以动态改变行为</li>
+<li>可扩展：易于添加新的委托方法</li>
+<p><strong>作用</strong>：</p></ul>
+<h3>3. 组合模式</h3>
+<div class="code-block"><pre><code class="language-objective-c">// 单约束和复合约束继承同一基类
+MASConstraint (抽象)
+  ├─ MASViewConstraint (叶子节点)
+  └─ MASCompositeConstraint (容器节点)
+      └─ 包含多个MASViewConstraint</code></pre></div>
+<ul>
+<li>统一接口：客户端无需区分</li>
+<li>递归结构：天然支持树形层次</li>
+<li>透明性：单个和组合使用相同API</li>
+<p><strong>优势</strong>：</p></ul>
+<h3>4. 自动装箱</h3>
+<div class="code-block"><pre><code class="language-objective-c">// 宏简化使用
+make.width.mas_equalTo(100);  // 自动转为NSNumber
+make.size.mas_equalTo(CGSizeMake(100, 200));  // 自动转为NSValue</code></pre></div>
+<ul>
+<li>代码简洁</li>
+<li>类型安全</li>
+<li>减少错误</li>
+<p><strong>优势</strong>：</p></ul>
+<hr>
+<h2>📈 算法复杂度分析</h2>
+<h3>约束创建</h3>
+<ul>
+<li><strong>时间复杂度</strong>：O(1) - 常量时间</li>
+<li><strong>空间复杂度</strong>：O(1) - 不依赖输入规模</li></ul>
+<h3>约束安装</h3>
+<ul>
+<li><strong>时间复杂度</strong>：O(n) - n为约束数量</li>
+<li><strong>空间复杂度</strong>：O(n) - 存储约束数组</li></ul>
+<h3>查找公共父视图</h3>
+<ul>
+<li><strong>时间复杂度</strong>：O(h₁ × h₂) - h为视图层级深度</li>
+<li><strong>空间复杂度</strong>：O(1) - 仅使用临时变量</li></ul>
+<h3>复合约束转发</h3>
+<ul>
+<li><strong>时间复杂度</strong>：O(m) - m为子约束数量</li>
+<li><strong>空间复杂度</strong>：O(1) - 不额外分配空间</li></ul>
+<hr>
+<h2>🎓 源码学习要点</h2>
+<h3>1. 设计原则应用</h3>
+<ul>
+<li><strong>单一职责</strong>：每个类只做一件事</li>
+<li><strong>开闭原则</strong>：通过继承和委托扩展</li>
+<li><strong>依赖倒置</strong>：依赖抽象而非具体</li>
+<li><strong>接口隔离</strong>：最小接口原则</li></ul>
+<h3>2. Objective-C 特性</h3>
+<ul>
+<li><strong>Category</strong>：扩展原生类，无侵入</li>
+<li><strong>Runtime</strong>：关联对象、方法调配</li>
+<li><strong>Block</strong>：闭包和链式调用</li>
+<li><strong>协议</strong>：委托模式实现</li></ul>
+<h3>3. 内存管理</h3>
+<ul>
+<li><strong>弱引用</strong>：避免循环引用</li>
+<li><strong>自动释放池</strong>：批量操作时的内存控制</li>
+<li><strong>引用计数</strong>：理解对象生命周期</li></ul>
+<h3>4. 调试技巧</h3>
+<ul>
+<li><strong>断言</strong>：提前发现问题</li>
+<li><strong>Key标识</strong>：便于调试</li>
+<li><strong>防御性编程</strong>：处理异常情况</li></ul>
+<hr>
+<h2>💡 可借鉴的设计模式</h2>
+<h3>1. 工厂方法模式</h3>
+<div class="code-block"><pre><code class="language-objective-c">// 通过属性访问器作为工厂入口
+- (MASConstraint *)left {
+    return [self addConstraintWithLayoutAttribute:NSLayoutAttributeLeft];
+}</code></pre></div>
+<h3>2. 建造者模式</h3>
+<div class="code-block"><pre><code class="language-objective-c">// 链式配置
+make.left.equalTo(superview).offset(10).priorityHigh();</code></pre></div>
+<h3>3. 组合模式</h3>
+<div class="code-block"><pre><code class="language-objective-c">// 统一接口处理单个和多个对象
+[composite install];  // 内部遍历children
+[single install];     // 直接操作</code></pre></div>
+<h3>4. 代理模式</h3>
+<div class="code-block"><pre><code class="language-objective-c">// 对象间通信，解耦
+constraint.delegate = self;
+[self constraint:constraint shouldBeReplacedWithConstraint:newConstraint];</code></pre></div>
+<hr>
+<h2>🎯 本章要点总结</h2>
+<h3>核心实现</h3>
+<ol>
+<li><strong>MASConstraintMaker</strong>：工厂 + 管理器 + 代理</li>
+<li><strong>MASConstraint</strong>：抽象基类 + 链式API</li>
+<li><strong>MASViewConstraint</strong>：单约束实现</li>
+<li><strong>MASCompositeConstraint</strong>：复合约束管理</li>
+<li><strong>MASViewAttribute</strong>：基础数据单元</li></ol>
+<h3>设计技巧</h3>
+<ul>
+<li>✅ 惰性求值，按需创建</li>
+<li>✅ 委托链，解耦通信</li>
+<li>✅ 组合模式，统一接口</li>
+<li>✅ 自动装箱，简化使用</li>
+<li>✅ 防御性编程，安全第一</li></ul>
+<h3>学习价值</h3>
+<ul>
+<li>API设计范例</li>
+<li>架构分层思想</li>
+<li>内存管理实践</li>
+<li>调试和扩展技巧</li></ul>
+<hr>
+<p><strong>下一章</strong>：<a href="08_生态分析.html">08_生态分析</a></p>
+<p><strong>上一章</strong>：<a href="06_最佳实践.html">06_最佳实践</a></p>
+<p><strong>返回目录</strong>：<a href="../index.html">README</a></p>
+
+            <div class="chapter-nav">
+                <a href="../index.html">🏠 首页</a>
+                <a href="#" onclick="history.back(); return false;">← 返回上一页</a>
+            </div>
+        </article>
+    </main>
+
+    <div class="toolbar">
+        <button onclick="scrollToTop()" title="滚动到顶部">↑</button>
+        <button onclick="toggleTOC()" title="切换目录">📑</button>
+        <button onclick="backToIndex()" title="返回首页">🏠</button>
+    </div>
+</body>
+</html>

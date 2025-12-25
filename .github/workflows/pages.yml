@@ -1,0 +1,102 @@
+# GitHub Pages 部署工作流
+# 用于部署 Masonry 深度分析文档到 GitHub Pages
+
+name: Deploy GitHub Pages
+
+on:
+  # 推送到 main 分支时触发
+  push:
+    branches: [ main ]
+
+  # 允许手动触发
+  workflow_dispatch:
+
+# 设置权限
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 只允许一个并发部署
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  # 构建作业
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1  # 浅克隆，加快速度
+
+      - name: 验证文件结构
+        run: |
+          echo "🔍 检查项目结构..."
+          ls -la
+          echo ""
+          echo "🔍 检查 html 目录..."
+          ls -la html/
+          echo ""
+          echo "🔍 检查 assets..."
+          ls -la html/assets/
+          echo ""
+          echo "🔍 检查文档..."
+          ls -la html/docs/
+          echo ""
+          echo "✅ 文件结构验证完成"
+
+      - name: 准备部署文件
+        run: |
+          echo "📦 准备 GitHub Pages 部署文件..."
+          # 创建部署目录
+          mkdir -p public
+          # 复制所有 HTML 文件和资源
+          cp -r html/* public/
+          echo "✅ 部署文件准备完成"
+          echo ""
+          echo "📊 部署文件统计:"
+          find public -type f | wc -l
+          echo "个文件将被部署"
+
+      - name: 验证部署内容
+        run: |
+          echo "🔍 验证 public 目录内容..."
+          ls -la public/
+          echo ""
+          echo "🔍 验证索引文件..."
+          if [ -f "public/index.html" ]; then
+            echo "✅ index.html 存在"
+          else
+            echo "❌ index.html 缺失"
+            exit 1
+          fi
+          echo ""
+          echo "🔍 验证章节文件..."
+          DOC_COUNT=$(find public/docs/ -name "*.html" 2>/dev/null | wc -l)
+          echo "找到 $DOC_COUNT 个章节 HTML 文件"
+          if [ "$DOC_COUNT" -eq 8 ]; then
+            echo "✅ 章节文件数量正确"
+          else
+            echo "⚠️  期望 8 个文件，找到 $DOC_COUNT 个"
+          fi
+
+      - name: 上传构建产物
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./public
+
+  # 部署作业
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: 部署到 GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

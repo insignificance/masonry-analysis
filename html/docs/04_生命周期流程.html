@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>04_Masonry 生命周期与完整流程 - Masonry 深度分析</title>
+    <meta name="description" content="04_生命周期与完整流程">
+    <link rel="stylesheet" href="../assets/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="../assets/js/navigation.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            if (typeof mermaid !== 'undefined') {
+                mermaid.initialize({
+                    startOnLoad: true,
+                    theme: 'default',
+                    securityLevel: 'loose',
+                    flowchart: { useMaxWidth: true, htmlLabels: true },
+                    sequence: { useMaxWidth: true }
+                });
+            }
+        });
+    </script>
+</head>
+<body>
+    <nav id="floating-toc" class="floating-toc">
+        <div class="toc-header">📚 目录</div>
+        <div id="toc-content"></div>
+    </nav>
+
+    <main class="content-area">
+        <article>
+            <h2>🎯 本章目标</h2>
+<ul>
+<li>掌握约束从创建到安装的完整生命周期</li>
+<li>理解三种创建方法的区别和适用场景</li>
+<li>学习约束的更新和移除机制</li>
+<li>掌握异常处理和调试技巧</li></ul>
+<hr>
+<h2>📊 完整生命周期概览</h2>
+<div class="mermaid">
+stateDiagram-v2
+    [*] --> Created: 用户调用API
+
+    Created --> Configuring: 进入Block
+    Configuring --> Configuring: 链式配置
+    Note right of Configuring: make.left.offset(10)...
+
+    Configuring --> Installing: Block结束
+    Installing --> Checking: 检查模式
+
+    Checking --> RemoveOld: remake模式
+    Checking --> UpdateExisting: update模式
+    Checking --> CreateNew: make模式
+
+    RemoveOld --> Uninstall: 卸载旧约束
+    UpdateExisting --> FindMatch: 查找匹配
+    CreateNew --> BuildConstraint: 构建约束
+
+    Uninstall --> BuildConstraint
+    FindMatch --> UpdateConstant: 更新常量
+    FindMatch --> BuildConstraint: 未找到
+
+    UpdateConstant --> AddToView
+    BuildConstraint --> AddToView
+
+    AddToView --> Installed: 添加成功
+    Installed --> [*]: 返回约束数组
+
+    state Configuring {
+        [*] --> Single: 单属性
+        [*] --> Composite: 复合属性
+        Single --> Single: 继续链式
+        Composite --> Composite: 继续配置
+    }</div>
+<hr>
+<h2>⏱️ 详细时序流程</h2>
+<h3>1. makeConstraints 完整流程</h3>
+<div class="mermaid">
+sequenceDiagram
+    participant View
+    participant Maker as MASConstraintMaker
+    participant Constraint as MASConstraint
+    participant ViewAttr as MASViewAttribute
+    participant Layout as NSLayoutConstraint
+    participant Superview
+
+    View->>Maker: 1. mas_makeConstraints:block
+    Note over View,Maker: 用户代码入口
+
+    Maker->>View: 2. translatesAutoresizingMaskIntoConstraints = NO
+    Note over View: 关闭自动转换
+
+    Maker->>Maker: 3. initWithView()
+    Note over Maker: 初始化工厂
+
+    View->>Maker: 4. 执行block()
+    Note over View: 用户配置开始
+
+    Maker->>Constraint: 5. make.left
+    Note over Maker: 工厂创建约束
+
+    Constraint->>ViewAttr: 6. 初始化MASViewAttribute
+    ViewAttr-->>Constraint: 7. 返回属性对象
+    Constraint-->>Maker: 8. 返回约束实例
+
+    View->>Constraint: 9. .equalTo().offset()
+    Note over Constraint: 链式配置
+
+    Maker->>Maker: 10. install()
+    Note over Maker: 开始安装
+
+    Maker->>Constraint: 11. 调用install()
+    Constraint->>Layout: 12. 创建NSLayoutConstraint
+    Note over Layout: 生成原生约束
+
+    Layout->>Superview: 13. addConstraint()
+    Note over Superview: 添加到父视图
+
+    Superview-->>View: 14. 约束生效
+    Maker-->>View: 15. 返回约束数组</div>
+<h3>2. updateConstraints 流程</h3>
+<div class="mermaid">
+flowchart TD
+    A["调用updateConstraints"] --> B["创建ConstraintMaker"]
+    B --> C["设置updateExisting = YES"]
+    C --> D["执行用户Block"]
+    D --> E["遍历约束配置"]
+
+    E --> F{"约束是否存在?"}
+    F -->|是| G["查找匹配约束"]
+    F -->|否| H["创建新约束"]
+
+    G --> I["更新常量值"]
+    H --> J["创建NSLayoutConstraint"]
+
+    I --> K["添加到视图"]
+    J --> K
+
+    K --> L["返回约束数组"]</div>
+<p><strong>关键代码</strong>：</p>
+<div class="code-block"><pre><code class="language-objective-c">// View+MASAdditions.m
+- (NSArray *)mas_updateConstraints:(void(^)(MASConstraintMaker *))block {
+    self.translatesAutoresizingMaskIntoConstraints = NO;
+    MASConstraintMaker *constraintMaker = [[MASConstraintMaker alloc] initWithView:self];
+    constraintMaker.updateExisting = YES;  // 关键标志
+    block(constraintMaker);
+    return [constraintMaker install];
+}
+
+// MASConstraintMaker.m
+- (NSArray *)install {
+    // ... 其他逻辑
+    for (MASConstraint *constraint in constraints) {
+        constraint.updateExisting = self.updateExisting;  // 传递标志
+        [constraint install];
+    }
+    // ...
+}
+
+// MASViewConstraint.m
+- (void)install {
+    if (self.updateExisting) {
+        // 查找并更新
+        NSArray *installed = [MASViewConstraint installedConstraintsForView:self.firstViewAttribute.view];
+        for (MASViewConstraint *constraint in installed) {
+            if ([constraint isEqualToConstraint:self]) {
+                [constraint setLayoutConstraint:self.layoutConstraint];
+                return;
+            }
+        }
+    }
+    // 未找到，创建新约束
+    // ...
+}</code></pre></div>
+<h3>3. remakeConstraints 流程</h3>
+<div class="mermaid">
+flowchart TD
+    A["调用remakeConstraints"] --> B["创建ConstraintMaker"]
+    B --> C["设置removeExisting = YES"]
+    C --> D["执行用户Block"]
+    D --> E["收集新约束"]
+
+    E --> F["安装前清理"]
+    F --> G["查找视图所有旧约束"]
+    G --> H["逐个uninstall"]
+    H --> I["清空旧约束"]
+
+    I --> J["安装新约束"]
+    J --> K["生成NSLayoutConstraint"]
+    K --> L["添加到视图"]
+
+    L --> M["返回新约束数组"]</div>
+<p><strong>关键代码</strong>：</p>
+<div class="code-block"><pre><code class="language-objective-c">// View+MASAdditions.m
+- (NSArray *)mas_remakeConstraints:(void(^)(MASConstraintMaker *))block {
+    self.translatesAutoresizingMaskIntoConstraints = NO;
+    MASConstraintMaker *constraintMaker = [[MASConstraintMaker alloc] initWithView:self];
+    constraintMaker.removeExisting = YES;  // 关键标志
+    block(constraintMaker);
+    return [constraintMaker install];
+}
+
+// MASConstraintMaker.m
+- (NSArray *)install {
+    // 1. 清理旧约束
+    if (self.removeExisting) {
+        NSArray *installedConstraints = [MASViewConstraint installedConstraintsForView:self.view];
+        for (MASConstraint *constraint in installedConstraints) {
+            [constraint uninstall];  // 逐个卸载
+        }
+    }
+
+    // 2. 安装新约束
+    NSArray *constraints = self.constraints.copy;
+    for (MASConstraint *constraint in constraints) {
+        constraint.updateExisting = self.updateExisting;
+        [constraint install];
+    }
+
+    [self.constraints removeAllObjects];
+    return constraints;
+}</code></pre></div>
+<hr>
+<h2>🔍 约束配置阶段详解</h2>
+<h3>阶段1：属性访问与创建</h3>
+<div class="mermaid">
+flowchart TD
+    A[make.left] --> B["调用MASConstraintMaker.left"]
+    B --> C["addConstraintWithLayoutAttribute:left"]
+    C --> D["创建MASViewAttribute"]
+    D --> E["创建MASViewConstraint"]
+    E --> F["设置delegate为Maker"]
+    F --> G["添加到constraints数组"]
+    G --> H["返回约束对象"]</div>
+<p><strong>代码追踪</strong>：</p>
+<div class="code-block"><pre><code class="language-objective-c">// 1. 用户调用
+make.left
+
+// 2. MASConstraintMaker.m:138
+- (MASConstraint *)left {
+    return [self addConstraintWithLayoutAttribute:NSLayoutAttributeLeft];
+}
+
+// 3. MASConstraintMaker.m:134
+- (MASConstraint *)addConstraintWithLayoutAttribute:(NSLayoutAttribute)layoutAttribute {
+    // 创建视图属性
+    MASViewAttribute *viewAttribute = [[MASViewAttribute alloc]
+                                       initWithView:self.view
+                                       layoutAttribute:layoutAttribute];
+
+    // 创建约束
+    MASViewConstraint *newConstraint = [[MASViewConstraint alloc]
+                                        initWithFirstViewAttribute:viewAttribute];
+
+    // 设置代理
+    newConstraint.delegate = self;
+
+    // 添加到数组
+    [self.constraints addObject:newConstraint];
+
+    return newConstraint;
+}</code></pre></div>
+<h3>阶段2：链式配置</h3>
+<div class="mermaid">
+flowchart LR
+    A[".equalTo(superview)"] --> B["设置关系"]
+    B --> C[".offset(10)"]
+    C --> D["设置偏移"]
+    D --> E[".priorityHigh()"]
+    E --> F["设置优先级"]
+    F --> G[".key()"]
+    G --> H["设置标识"]
+    H --> I["配置完成"]</div>
+<p><strong>代码追踪</strong>：</p>
+<div class="code-block"><pre><code class="language-objective-c">// 1. .equalTo(superview)
+- (MASConstraint * (^)(id))equalTo {
+    return ^id(id attribute) {
+        // 处理不同类型
+        if ([attribute isKindOfClass:MASViewAttribute.class]) {
+            _secondViewAttribute = attribute;
+        } else if ([attribute isKindOfClass:MAS_VIEW.class]) {
+            // 自动转换为对应属性
+            MAS_VIEW *view = (MAS_VIEW *)attribute;
+            if (_firstViewAttribute.isSizeAttribute) {
+                _secondViewAttribute = [[MASViewAttribute alloc]
+                                       initWithView:view
+                                       item:nil
+                                       layoutAttribute:NSLayoutAttributeNotAnAttribute];
+            } else {
+                _secondViewAttribute = [[MASViewAttribute alloc]
+                                       initWithView:view
+                                       layoutAttribute:_firstViewAttribute.layoutAttribute];
+            }
+        }
+        return self;  // 关键：返回self继续链式
+    };
+}
+
+// 2. .offset(10)
+- (MASConstraint * (^)(CGFloat))offset {
+    return ^id(CGFloat offset) {
+        self.offset = offset;  // 存储值
+        return self;           // 返回self
+    };
+}
+
+// 3. .priorityHigh()
+- (MASConstraint * (^)(void))priorityHigh {
+    return ^id{
+        self.priority = MASLayoutPriorityDefaultHigh;
+        return self;
+    };
+}</code></pre></div>
+<h3>阶段3：安装准备</h3>
+<div class="mermaid">
+flowchart TD
+    A["Block结束"] --> B["调用constraintMaker.install"]
+    B --> C["检查removeExisting标志"]
+    C -->|是| D["遍历并卸载旧约束"]
+    C -->|否| E["跳过清理"]
+
+    D --> F["复制constraints数组"]
+    E --> F
+
+    F --> G["遍历每个约束"]
+    G --> H["设置updateExisting标志"]
+    H --> I["调用constraint.install"]
+
+    I --> J["收集结果"]
+    J --> K["清空临时数组"]
+    K --> L["返回约束数组"]</div>
+<p><strong>代码追踪</strong>：</p>
+<div class="code-block"><pre><code class="language-objective-c">// MASConstraintMaker.m:35
+- (NSArray *)install {
+    // 1. 处理重做模式
+    if (self.removeExisting) {
+        NSArray *installedConstraints = [MASViewConstraint installedConstraintsForView:self.view];
+        for (MASConstraint *constraint in installedConstraints) {
+            [constraint uninstall];
+        }
+    }
+
+    // 2. 防御性复制
+    NSArray *constraints = self.constraints.copy;
+
+    // 3. 安装每个约束
+    for (MASConstraint *constraint in constraints) {
+        constraint.updateExisting = self.updateExisting;
+        [constraint install];
+    }
+
+    // 4. 清理现场
+    [self.constraints removeAllObjects];
+
+    return constraints;
+}</code></pre></div>
+<hr>
+<h2>🔧 约束安装阶段详解</h2>
+<h3>单约束安装 (MASViewConstraint)</h3>
+<div class="mermaid">
+flowchart TD
+    A["install调用"] --> B{updateExisting?}
+    B -->|是| C["查找已存在约束"]
+    B -->|否| D["直接创建"]
+
+    C --> E{"找到匹配?"}
+    E -->|是| F["更新常量"]
+    E -->|否| D
+
+    D --> G["创建NSLayoutConstraint"]
+    G --> H["找到安装视图"]
+    H --> I["添加约束"]
+    I --> J["完成"]
+
+    F --> J</div>
+<p><strong>详细流程</strong>：</p>
+<div class="code-block"><pre><code class="language-objective-c">// MASViewConstraint.m
+- (void)install {
+    // 1. 处理更新模式
+    if (self.updateExisting) {
+        NSArray *installed = [MASViewConstraint installedConstraintsForView:self.firstViewAttribute.view];
+        for (MASViewConstraint *constraint in installed) {
+            if ([constraint isEqualToConstraint:self]) {
+                // 找到匹配，更新而非创建
+                [constraint setLayoutConstraint:self.layoutConstraint];
+                return;
+            }
+        }
+    }
+
+    // 2. 创建原生约束
+    self.layoutConstraint = [self createLayoutConstraint];
+
+    // 3. 找到合适的安装视图
+    MAS_VIEW *installView = [self.firstViewAttribute.view];
+    if (self.secondViewAttribute.view) {
+        installView = [installView mas_closestCommonSuperview:self.secondViewAttribute.view];
+    }
+
+    // 4. 添加约束
+    [installView addConstraint:self.layoutConstraint];
+}
+
+// 创建NSLayoutConstraint
+- (NSLayoutConstraint *)createLayoutConstraint {
+    id firstItem = self.firstViewAttribute.item;
+    id secondItem = self.secondViewAttribute.item;
+
+    // 处理常量值
+    if ([secondItem isKindOfClass:NSValue.class]) {
+        secondItem = nil;
+        self.secondViewAttribute = [[MASViewAttribute alloc]
+                                   initWithView:nil
+                                   item:nil
+                                   layoutAttribute:NSLayoutAttributeNotAnAttribute];
+    }
+
+    return [NSLayoutConstraint constraintWithItem:firstItem
+                                      attribute:self.firstViewAttribute.layoutAttribute
+                                      relatedBy:self.layoutRelation
+                                         toItem:secondItem
+                                      attribute:self.secondViewAttribute.layoutAttribute
+                                     multiplier:self.layoutMultiplier
+                                       constant:self.layoutConstant];
+}
+
+// 查找最近公共父视图
+- (instancetype)mas_closestCommonSuperview:(MAS_VIEW *)view {
+    MAS_VIEW *closestCommonSuperview = nil;
+    MAS_VIEW *secondViewSuperview = view;
+
+    while (!closestCommonSuperview && secondViewSuperview) {
+        MAS_VIEW *firstViewSuperview = self;
+        while (!closestCommonSuperview && firstViewSuperview) {
+            if (secondViewSuperview == firstViewSuperview) {
+                closestCommonSuperview = secondViewSuperview;
+            }
+            firstViewSuperview = firstViewSuperview.superview;
+        }
+        secondViewSuperview = secondViewSuperview.superview;
+    }
+
+    return closestCommonSuperview;
+}</code></pre></div>
+<h3>复合约束安装 (MASCompositeConstraint)</h3>
+<div class="mermaid">
+flowchart TD
+    A["install调用"] --> B["遍历children数组"]
+    B --> C["每个child.install"]
+    C --> D{"child是单约束?"}
+    D -->|是| E["单约束安装流程"]
+    D -->|否| F["递归复合约束"]
+
+    E --> G["收集所有约束"]
+    F --> G
+
+    G --> H["全部完成"]</div>
+<p><strong>代码实现</strong>：</p>
+<div class="code-block"><pre><code class="language-objective-c">// MASCompositeConstraint.m
+- (void)install {
+    for (MASConstraint *child in self.children) {
+        child.updateExisting = self.updateExisting;
+        [child install];  // 递归调用
+    }
+}
+
+- (void)uninstall {
+    for (MASConstraint *child in self.children) {
+        [child uninstall];
+    }
+}
+
+// 链式操作转发
+- (MASConstraint * (^)(id))equalTo {
+    return ^id(id attribute) {
+        for (MASConstraint *child in self.children) {
+            [child equalTo:attribute];  // 转发给所有子约束
+        }
+        return self;
+    };
+}
+
+- (MASConstraint * (^)(MASEdgeInsets))insets {
+    return ^id(MASEdgeInsets insets) {
+        for (MASConstraint *child in self.children) {
+            if ([child isKindOfClass:MASViewConstraint.class]) {
+                MASViewConstraint *viewConstraint = (MASViewConstraint *)child;
+                NSLayoutAttribute attr = viewConstraint.firstViewAttribute.layoutAttribute;
+
+                // 根据不同边设置不同偏移
+                switch (attr) {
+                    case NSLayoutAttributeTop:
+                        [child offset:insets.top];
+                        break;
+                    case NSLayoutAttributeLeft:
+                        [child offset:insets.left];
+                        break;
+                    case NSLayoutAttributeBottom:
+                        [child offset:-insets.bottom];
+                        break;
+                    case NSLayoutAttributeRight:
+                        [child offset:-insets.right];
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+        return self;
+    };
+}</code></pre></div>
+<hr>
+<h2>🔄 约束更新机制</h2>
+<h3>更新模式识别</h3>
+<div class="mermaid">
+flowchart TD
+    A["用户调用方法"] --> B{"方法类型"}
+    B -->|makeConstraints| C["updateExisting = false"]
+    B -->|updateConstraints| D["updateExisting = true"]
+    B -->|remakeConstraints| E["removeExisting = true"]
+
+    C --> F["直接添加"]
+    D --> G["查找并更新"]
+    E --> H["清理后添加"]</div>
+<h3>更新匹配逻辑</h3>
+<div class="code-block"><pre><code class="language-objective-c">// MASViewConstraint.m
+- (BOOL)isEqualToConstraint:(MASViewConstraint *)constraint {
+    // 比较第一个视图属性
+    if (self.firstViewAttribute != constraint.firstViewAttribute) {
+        return NO;
+    }
+
+    // 比较第二个视图属性
+    if (self.secondViewAttribute != constraint.secondViewAttribute) {
+        return NO;
+    }
+
+    // 比较布局属性
+    if (self.firstViewAttribute.layoutAttribute != constraint.firstViewAttribute.layoutAttribute) {
+        return NO;
+    }
+
+    return YES;
+}
+
+// 更新约束常量
+- (void)setLayoutConstraint:(NSLayoutConstraint *)layoutConstraint {
+    // 保持原有约束，只更新常量
+    self.layoutConstraint = layoutConstraint;
+
+    // 更新常量值
+    layoutConstraint.constant = self.layoutConstant;
+
+    // 更新优先级
+    layoutConstraint.priority = self.layoutPriority;
+}</code></pre></div>
+<h3>更新场景示例</h3>
+<div class="code-block"><pre><code class="language-objective-c">// 场景1：动态调整间距
+- (void)updateBottomConstraint:(CGFloat)offset {
+    [self.view mas_updateConstraints:^(MASConstraintMaker *make) {
+        make.bottom.offset(offset);  // 只更新常量
+    }];
+}
+
+// 场景2：动画更新
+[UIView animateWithDuration:0.3 animations:^{
+    [self.view mas_updateConstraints:^(MASConstraintMaker *make) {
+        make.width.offset(newWidth);
+    }];
+    [self layoutIfNeeded];
+}];
+
+// 场景3：条件更新
+if (isLargeMode) {
+    [self.view mas_updateConstraints:^(MASConstraintMaker *make) {
+        make.size.mas_equalTo(CGSizeMake(200, 200));
+    }];
+}</code></pre></div>
+<hr>
+<h2>🗑️ 约束卸载机制</h2>
+<h3>卸载流程</h3>
+<div class="mermaid">
+flowchart TD
+    A["uninstall调用"] --> B["获取layoutConstraint"]
+    B --> C{"是否存在?"}
+    C -->|否| D["直接返回"]
+    C -->|是| E["从父视图移除"]
+    E --> F["置空引用"]
+    F --> G["完成"]</div>
+<p><strong>代码实现</strong>：</p>
+<div class="code-block"><pre><code class="language-objective-c">// MASViewConstraint.m
+- (void)uninstall {
+    // 1. 处理复合约束
+    if ([self isKindOfClass:MASCompositeConstraint.class]) {
+        [super uninstall];
+        return;
+    }
+
+    // 2. 移除约束
+    if ([self.layoutConstraint respondsToSelector:@selector(isActive)] && self.layoutConstraint.isActive) {
+        [self.layoutConstraint setActive:NO];
+    } else {
+        [self.firstViewAttribute.view removeConstraint:self.layoutConstraint];
+    }
+
+    // 3. 清理引用
+    self.layoutConstraint = nil;
+    self.secondViewAttribute = nil;
+}
+
+// MASCompositeConstraint.m
+- (void)uninstall {
+    for (MASConstraint *child in self.children) {
+        [child uninstall];
+    }
+}</code></pre></div>
+<h3>卸载场景</h3>
+<div class="code-block"><pre><code class="language-objective-c">// 场景1：remakeConstraints自动卸载
+[view mas_remakeConstraints:^(MASConstraintMaker *make) {
+    // 旧约束自动被移除
+    make.edges.equalTo(superview);
+}];
+
+// 场景2：手动卸载（较少使用）
+NSArray *constraints = [view mas_makeConstraints:^(MASConstraintMaker *make) {
+    make.left.offset(10);
+}];
+// 手动卸载
+for (MASConstraint *constraint in constraints) {
+    [constraint uninstall];
+}
+
+// 场景3：视图移除时
+[view removeFromSuperview];  // 约束自动失效</code></pre></div>
+<hr>
+<h2>⚠️ 异常处理与调试</h2>
+<h3>常见异常场景</h3>
+<div class="mermaid">
+flowchart TD
+    A["异常场景"] --> B{"类型判断"}
+    B -->|视图未添加到父视图| C["找不到公共父视图"]
+    B -->|约束冲突| D["运行时崩溃"]
+    B -->|循环引用| E["内存泄漏"]
+    B -->|属性错误| F["约束无效"]
+
+    C --> G["返回nil"]
+    D --> H["断言失败"]
+    E --> I["内存持续增长"]
+    F --> J["布局异常"]</div>
+<h3>防御性编程</h3>
+<div class="code-block"><pre><code class="language-objective-c">// 1. 查找公共父视图失败
+- (instancetype)mas_closestCommonSuperview:(MAS_VIEW *)view {
+    MAS_VIEW *closestCommonSuperview = nil;
+    MAS_VIEW *secondViewSuperview = view;
+
+    while (!closestCommonSuperview && secondViewSuperview) {
+        // ... 查找逻辑
+    }
+
+    // 关键：返回nil时的处理
+    if (!closestCommonSuperview) {
+        NSLog(@"⚠️ Warning: Could not find common superview for views: %@ and %@", self, view);
+    }
+
+    return closestCommonSuperview;
+}
+
+// 2. 安装时的断言
+- (void)install {
+    NSAssert(self.firstViewAttribute, @"First view attribute cannot be nil");
+
+    if (self.secondViewAttribute && self.secondViewAttribute.view) {
+        MAS_VIEW *commonSuperview = [self.firstViewAttribute.view mas_closestCommonSuperview:self.secondViewAttribute.view];
+        NSAssert(commonSuperview, @"Can't find common superview. Make sure both views are in the same view hierarchy.");
+    }
+
+    // ... 安装逻辑
+}
+
+// 3. 约束相等性检查
+- (BOOL)isEqualToConstraint:(MASViewConstraint *)constraint {
+    if (!constraint) return NO;
+    if (self == constraint) return YES;
+
+    NSAssert(self.firstViewAttribute, @"First view attribute is nil");
+    NSAssert(constraint.firstViewAttribute, @"Other constraint's first view attribute is nil");
+
+    // ... 比较逻辑
+}</code></pre></div>
+<h3>调试技巧</h3>
+<div class="code-block"><pre><code class="language-objective-c">// 1. 使用key标识约束
+[view mas_makeConstraints:^(MASConstraintMaker *make) {
+    make.left.offset(10).key(@"leftConstraint");
+    make.top.offset(20).key(@"topConstraint");
+}];
+
+// 2. 打印约束信息
+NSArray *constraints = [MASViewConstraint installedConstraintsForView:view];
+for (MASViewConstraint *constraint in constraints) {
+    NSLog(@"Constraint: %@", constraint.layoutConstraint);
+}
+
+// 3. 检查约束冲突
+- (void)checkConstraintConflicts {
+    NSArray *installed = [MASViewConstraint installedConstraintsForView:self.view];
+    NSMutableArray *attributes = [NSMutableArray array];
+
+    for (MASViewConstraint *constraint in installed) {
+        NSLayoutAttribute attr = constraint.firstViewAttribute.layoutAttribute;
+        if ([attributes containsObject:@(attr)]) {
+            NSLog(@"⚠️ Warning: Duplicate constraint for attribute %ld", (long)attr);
+        }
+        [attributes addObject:@(attr)];
+    }
+}
+
+// 4. 视图层级调试
+- (void)debugViewHierarchy {
+    NSLog(@"View: %@", self.view);
+    NSLog(@"Superview: %@", self.view.superview);
+    NSLog(@"Constraints: %@", self.view.constraints);
+
+    // 打印所有约束
+    for (NSLayoutConstraint *constraint in self.view.constraints) {
+        NSLog(@"  - %@", constraint);
+    }
+}</code></pre></div>
+<hr>
+<h2>📊 完整流程示例</h2>
+<h3>示例1：基础约束创建</h3>
+<div class="code-block"><pre><code class="language-objective-c">// 用户代码
+[view mas_makeConstraints:^(MASConstraintMaker *make) {
+    make.left.equalTo(superview).offset(10);
+    make.top.equalTo(superview).offset(20);
+    make.width.mas_equalTo(100);
+    make.height.mas_equalTo(50);
+}];
+
+// 内部执行流程
+// 1. 创建MASConstraintMaker
+// 2. 执行Block
+//    - make.left → 创建MASViewConstraint
+//    - .equalTo(superview) → 设置secondViewAttribute
+//    - .offset(10) → 设置layoutConstant = 10
+//    - make.top → 创建MASViewConstraint
+//    - ... 重复
+// 3. 调用install()
+//    - 遍历4个约束
+//    - 每个调用install()
+//    - 创建4个NSLayoutConstraint
+//    - 添加到superview
+// 4. 返回约束数组</code></pre></div>
+<h3>示例2：复合约束</h3>
+<div class="code-block"><pre><code class="language-objective-c">// 用户代码
+[view mas_makeConstraints:^(MASConstraintMaker *make) {
+    make.edges.equalTo(superview).insets(UIEdgeInsetsMake(10, 10, 10, 10));
+}];
+
+// 内部执行流程
+// 1. make.edges
+//    - 创建MASCompositeConstraint
+//    - 包含4个MASViewConstraint (top, left, bottom, right)
+// 2. .equalTo(superview)
+//    - 转发给4个子约束
+//    - 每个设置secondViewAttribute
+// 3. .insets(...)
+//    - 遍历子约束
+//    - top: offset = 10
+//    - left: offset = 10
+//    - bottom: offset = -10
+//    - right: offset = -10
+// 4. install()
+//    - composite.install()
+//    - 遍历children.install()
+//    - 创建4个NSLayoutConstraint
+//    - 添加到superview</code></pre></div>
+<h3>示例3：更新约束</h3>
+<div class="code-block"><pre><code class="language-objective-c">// 初始创建
+[view mas_makeConstraints:^(MASConstraintMaker *make) {
+    make.left.offset(10);
+}];
+
+// 后续更新
+[view mas_updateConstraints:^(MASConstraintMaker *make) {
+    make.left.offset(20);  // 只更新常量
+}];
+
+// 内部流程
+// 1. 设置updateExisting = YES
+// 2. 创建新约束对象 (left, offset=20)
+// 3. install()时检测到update模式
+// 4. 查找已存在的left约束
+// 5. 更新其constant为20
+// 6. 不创建新NSLayoutConstraint</code></pre></div>
+<hr>
+<h2>🎓 本章要点总结</h2>
+<h3>生命周期阶段</h3>
+<ol>
+<li><strong>创建阶段</strong>：MASConstraintMaker初始化，设置标志位</li>
+<li><strong>配置阶段</strong>：用户Block执行，链式调用配置</li>
+<li><strong>安装阶段</strong>：遍历约束，创建NSLayoutConstraint</li>
+<li><strong>清理阶段</strong>：移除临时数组，返回结果</li></ol>
+<h3>三种方法对比</h3>
+<table>
+<thead>
+<tr><th>方法</th><th>标志位</th><th>旧约束</th><th>适用场景</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>makeConstraints</strong></td><td>无</td><td>保留</td><td>首次创建</td></tr><tr><td><strong>updateConstraints</strong></td><td>updateExisting</td><td>保留</td><td>动态更新</td></tr><tr><td><strong>remakeConstraints</strong></td><td>removeExisting</td><td>移除</td><td>完全重置</td></tr>
+</tbody></table>
+<h3>关键机制</h3>
+<ul>
+<li><strong>防御性复制</strong>：避免遍历时修改数组</li>
+<li><strong>委托模式</strong>：处理约束替换和组合</li>
+<li><strong>查找匹配</strong>：基于视图属性相等性</li>
+<li><strong>公共父视图</strong>：确保约束可添加</li></ul>
+<h3>调试要点</h3>
+<ul>
+<li>使用key标识约束</li>
+<li>检查视图层级关系</li>
+<li>监控约束冲突</li>
+<li>利用断言提前发现问题</li></ul>
+<hr>
+<p><strong>下一章</strong>：<a href="05_API使用指南.html">05_API使用指南</a></p>
+<p><strong>上一章</strong>：<a href="03_设计模式分析.html">03_设计模式分析</a></p>
+<p><strong>返回目录</strong>：<a href="../index.html">README</a></p>
+
+            <div class="chapter-nav">
+                <a href="../index.html">🏠 首页</a>
+                <a href="#" onclick="history.back(); return false;">← 返回上一页</a>
+            </div>
+        </article>
+    </main>
+
+    <div class="toolbar">
+        <button onclick="scrollToTop()" title="滚动到顶部">↑</button>
+        <button onclick="toggleTOC()" title="切换目录">📑</button>
+        <button onclick="backToIndex()" title="返回首页">🏠</button>
+    </div>
+</body>
+</html>

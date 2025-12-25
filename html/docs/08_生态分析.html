@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>08_Masonry 生态分析与演进 - Masonry 深度分析</title>
+    <meta name="description" content="08_生态分析与演进">
+    <link rel="stylesheet" href="../assets/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="../assets/js/navigation.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            if (typeof mermaid !== 'undefined') {
+                mermaid.initialize({
+                    startOnLoad: true,
+                    theme: 'default',
+                    securityLevel: 'loose',
+                    flowchart: { useMaxWidth: true, htmlLabels: true },
+                    sequence: { useMaxWidth: true }
+                });
+            }
+        });
+    </script>
+</head>
+<body>
+    <nav id="floating-toc" class="floating-toc">
+        <div class="toc-header">📚 目录</div>
+        <div id="toc-content"></div>
+    </nav>
+
+    <main class="content-area">
+        <article>
+            <h2>🎯 本章目标</h2>
+<ul>
+<li>了解 Masonry 的社区生态</li>
+<li>分析竞品对比和选择建议</li>
+<li>掌握版本演进历史</li>
+<li>探索未来发展趋势</li></ul>
+<hr>
+<h2>📊 生态概览图</h2>
+<div class="mermaid">
+mindmap
+  root((Masonry生态))
+    "核心库"
+      Masonry
+      "SnapKit Swift版本"
+    "竞品框架"
+      PureLayout
+      Cartography
+      SnapKit
+      AutoLayout
+    "使用场景"
+      "iOS开发"
+      "macOS开发"
+      "tvOS开发"
+    "社区资源"
+      "GitHub仓库"
+      "文档教程"
+      "代码示例"
+    "演进历史"
+      "版本迭代"
+      "功能增强"
+      "性能优化"
+    "未来趋势"
+      SwiftUI
+      "新架构"
+      "兼容性"</div>
+<hr>
+<h2>🏆 竞品对比分析</h2>
+<h3>1. Masonry vs PureLayout</h3>
+<div class="mermaid">
+flowchart TD
+    A[Masonry] --> B[Objective-C]
+    A --> C["链式API"]
+    A --> D["轻量级"]
+
+    E[PureLayout] --> F[Objective-C]
+    E --> G["链式API"]
+    E --> H["功能丰富"]
+
+    I["对比"] --> J{"选择建议"}
+    J -->|OC项目| K["优先Masonry"]
+    J -->|需要更多功能| L["考虑PureLayout"]</div>
+<p><strong>详细对比表</strong>：</p>
+<table>
+<thead>
+<tr><th>特性</th><th>Masonry</th><th>PureLayout</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>语言</strong></td><td>Objective-C</td><td>Objective-C</td></tr><tr><td><strong>API风格</strong></td><td>链式调用</td><td>链式调用</td></tr><tr><td><strong>代码量</strong></td><td>极简</td><td>较多</td></tr><tr><td><strong>功能丰富度</strong></td><td>核心功能</td><td>扩展功能多</td></tr><tr><td><strong>学习曲线</strong></td><td>平缓</td><td>平缓</td></tr><tr><td><strong>性能</strong></td><td>优秀</td><td>优秀</td></tr><tr><td><strong>维护状态</strong></td><td>稳定</td><td>活跃</td></tr><tr><td><strong>社区支持</strong></td><td>广泛</td><td>良好</td></tr>
+</tbody></table>
+<p><strong>代码对比</strong>：</p>
+<div class="code-block"><pre><code class="language-objective-c">// Masonry
+[view mas_makeConstraints:^(MASConstraintMaker *make) {
+    make.left.equalTo(superview).offset(10);
+    make.top.equalTo(superview).offset(20);
+    make.width.mas_equalTo(100);
+    make.height.mas_equalTo(50);
+}];
+
+// PureLayout
+[view autoPinEdgeToSuperviewEdge:ALEdgeLeft withInset:10];
+[view autoPinEdgeToSuperviewEdge:ALEdgeTop withInset:20];
+[view autoSetDimensionsToSize:CGSizeMake(100, 50)];</code></pre></div>
+<h3>2. Masonry vs SnapKit (Swift)</h3>
+<div class="mermaid">
+flowchart TD
+    A[Masonry] --> B[Objective-C]
+    A --> C["传统项目"]
+    A --> D["稳定可靠"]
+
+    E[SnapKit] --> F[Swift]
+    E --> G["现代项目"]
+    E --> H["类型安全"]
+
+    I["迁移路径"] --> J{"项目状态"}
+    J -->|OC项目| K["使用Masonry"]
+    J -->|Swift项目| L["使用SnapKit"]
+    J -->|混合项目| M["两者并存"]</div>
+<p><strong>Swift版本对比</strong>： ``<code>swift // SnapKit (Swift) view.snp.makeConstraints { make in make.left.equalToSuperview().offset(10) make.top.equalToSuperview().offset(20) make.width.equalTo(100) make.height.equalTo(50) }</p>
+<p>// 与Masonry几乎相同，只是语法差异 </code>`<code></p>
+<ul>
+<li>✅ <strong>Objective-C项目</strong>：Masonry</li>
+<li>✅ <strong>Swift项目</strong>：SnapKit</li>
+<li>✅ <strong>混合项目</strong>：两者都可用</li>
+<p><strong>选择建议</strong>：</p></ul>
+<h3>3. Masonry vs Cartography</h3>
+<div class="mermaid">
+graph LR
+    subgraph Masonry
+        A["命令式"]
+        B["链式"]
+        C["运行时"]
+    end
+
+    subgraph Cartography
+        D["声明式"]
+        E["函数式"]
+        F["编译时"]
+    end
+
+    A --> G["直观易懂"]
+    D --> H["类型安全"]
+    B --> I["流畅"]
+    E --> J["优雅"]
+    C --> K["灵活"]
+    F --> L["错误检查"]</div>
+<p><strong>代码对比</strong>：</p>
+<div class="code-block"><pre><code class="language-objective-c">// Masonry (命令式)
+[view mas_makeConstraints:^(MASConstraintMaker *make) {
+    make.left.equalTo(superview).offset(10);
+    make.width.mas_equalTo(100);
+}];
+
+// Cartography (声明式) - 已停止维护
+constrain(view, superview) { view, superview in
+    view.left == superview.left + 10
+    view.width == 100
+}</code></pre></div>
+<h3>4. 与原生 Auto Layout 对比</h3>
+<div class="mermaid">
+flowchart TD
+    A["原生AutoLayout"] --> B[NSLayoutConstraint]
+    A --> C["Visual Format Language"]
+    A --> D[UIStackView]
+
+    E[Masonry] --> F[MASConstraintMaker]
+    E --> G["链式API"]
+    E --> H["自动装箱"]
+
+    I["对比"] --> J{"使用场景"}
+    J -->|简单约束| K["原生足够"]
+    J -->|复杂布局| L["Masonry更高效"]
+    J -->|团队协作| M["Masonry更清晰"]</div>
+<hr>
+<h2>📈 版本演进历史</h2>
+<h3>里程碑版本</h3>
+<div class="mermaid">
+gantt
+    title Masonry 版本演进
+    dateFormat  YYYY-MM-DD
+
+    section 基础阶段
+    v0.1.0 : 2013-07-20, 30d
+    v0.2.0 : 2013-09-15, 30d
+    v0.3.0 : 2013-11-20, 30d
+
+    section 成熟阶段
+    v0.4.0 : 2014-03-10, 60d
+    v0.5.0 : 2014-06-15, 60d
+    v0.6.0 : 2014-10-20, 60d
+
+    section 稳定阶段
+    v1.0.0 : 2015-05-10, 90d
+    v1.1.0 : 2016-01-15, 90d
+
+    section 维护阶段
+    v1.2.0 : 2017-03-20, 120d
+    稳定维护 : 2017-07-20, 2000d</div>
+<h3>关键版本特性</h3>
+<h4>v0.1.0 (2013-07-20) - 初始版本</h4>
+<div class="code-block"><pre><code class="language-objective-c">// 基础API
+make.left.equalTo(superview);
+make.width.mas_equalTo(100);</code></pre></div>
+<ul>
+<li>✅ 基础链式API</li>
+<li>✅ 单约束支持</li>
+<li>✅ iOS/macOS兼容</li>
+<p><strong>特性</strong>：</p></ul>
+<h4>v0.5.0 (2014-06-15) - 复合约束</h4>
+<div class="code-block"><pre><code class="language-objective-c">// 新增复合属性
+make.edges.equalTo(superview);
+make.size.mas_equalTo(CGSizeMake(100, 100));
+make.center.equalTo(superview);</code></pre></div>
+<ul>
+<li>✅ edges/size/center复合属性</li>
+<li>✅ 批量操作优化</li>
+<li>✅ 性能提升</li>
+<p><strong>特性</strong>：</p></ul>
+<h4>v1.0.0 (2015-05-10) - 稳定版</h4>
+<div class="code-block"><pre><code class="language-objective-c">// 完整API
+make.left.equalTo(superview).offset(10).priorityHigh();
+make.width.equalTo(superview).multipliedBy(0.5);</code></pre></div>
+<ul>
+<li>✅ 完整的链式配置</li>
+<li>✅ 优先级支持</li>
+<li>✅ 乘除法支持</li>
+<li>✅ 代码稳定</li>
+<p><strong>特性</strong>：</p></ul>
+<h4>v1.1.0 (2016-01-15) - 增强功能</h4>
+<div class="code-block"><pre><code class="language-objective-c">// 新增功能
+make.firstBaseline.equalTo(label);
+make.safeAreaLayoutGuideTop.equalTo(10);</code></pre></div>
+<ul>
+<li>✅ 基线对齐</li>
+<li>✅ 安全区域支持 (iOS 11+)</li>
+<li>✅ 边距属性</li>
+<p><strong>特性</strong>：</p></ul>
+<h4>v1.2.0 (2017-03-20) - 最终更新</h4>
+<div class="code-block"><pre><code class="language-objective-c">// 调试增强
+make.left.offset(10).key(@"leftConstraint");</code></pre></div>
+<ul>
+<li>✅ 约束标识key</li>
+<li>✅ 调试支持</li>
+<li>✅ Bug修复</li>
+<p><strong>特性</strong>：</p></ul>
+<h3>当前状态</h3>
+<ul>
+<li><strong>版本</strong>：v1.2.0 (最新)</li>
+<li><strong>维护模式</strong>：稳定维护</li>
+<li><strong>更新频率</strong>：低（仅修复严重Bug）</li>
+<li><strong>推荐状态</strong>：生产环境可用</li></ul>
+<hr>
+<h2>🌍 社区生态</h2>
+<h3>GitHub 数据</h3>
+<div class="mermaid">
+pie
+    title Masonry GitHub 统计
+    "Stars" : 17000
+    "Forks" : 3000
+    "Issues" : 50
+    "PRs" : 200</div>
+<ul>
+<li>⭐ <strong>Stars</strong>: 17,000+</li>
+<li>🍴 <strong>Forks</strong>: 3,000+</li>
+<li>🐛 <strong>Open Issues</strong>: ~50</li>
+<li>📝 <strong>Pull Requests</strong>: ~200</li>
+<li>📊 <strong>使用量</strong>: 数十万应用</li>
+<p><strong>关键指标</strong>：</p></ul>
+<h3>社区贡献</h3>
+<div class="mermaid">
+flowchart TD
+    A["核心维护者"] --> B["Jonas Budelmann"]
+    A --> C["社区贡献者"]
+
+    C --> D["代码贡献"]
+    C --> E["文档完善"]
+    C --> F["问题解答"]
+
+    D --> G["PR合并"]
+    E --> H["教程分享"]
+    F --> I["Stack Overflow"]</div>
+<h3>学习资源</h3>
+<ul>
+<li>📚 GitHub仓库: </code>https://github.com/SnapKit/Masonry<code></li>
+<li>📖 README文档: 详细使用说明</li>
+<li>📝 示例代码: Examples目录</li>
+<p><strong>官方资源</strong>：</p></ul>
+<ul>
+<li>🎓 博客文章: 大量技术博客</li>
+<li>📹 视频教程: YouTube/B站</li>
+<li>💬 讨论区: Stack Overflow</li>
+<li>📱 Demo项目: GitHub示例</li>
+<p><strong>社区资源</strong>：</p></ul>
+<hr>
+<h2>🔄 迁移与兼容性</h2>
+<h3>从原生Auto Layout迁移</h3>
+<div class="mermaid">
+flowchart LR
+    A["原生代码"] --> B{"评估迁移"}
+    B -->|简单约束| C["保留原生"]
+    B -->|复杂布局| D["迁移到Masonry"]
+
+    D --> E["逐步替换"]
+    E --> F["测试验证"]
+    F --> G["完成迁移"]</div>
+<ol>
+<li><strong>添加依赖</strong>：Podfile或SPM</li>
+<li><strong>导入头文件</strong>：</code>#import <Masonry/Masonry.h>`</li>
+<li><strong>替换代码</strong>：逐个视图迁移</li>
+<li><strong>测试验证</strong>：确保布局正确</li>
+<li><strong>清理原生</strong>：移除旧代码</li>
+<p><strong>迁移步骤</strong>：</p></ol>
+<p><strong>迁移示例</strong>：</p>
+<div class="code-block"><pre><code class="language-objective-c">// 迁移前 (原生)
+view.translatesAutoresizingMaskIntoConstraints = NO;
+[NSLayoutConstraint activateConstraints:@[
+    [NSLayoutConstraint constraintWithItem:view
+                                 attribute:NSLayoutAttributeLeft
+                                 relatedBy:NSLayoutRelationEqual
+                                    toItem:superview
+                                 attribute:NSLayoutAttributeLeft
+                                multiplier:1.0
+                                  constant:10],
+    // ... 更多约束
+]];
+
+// 迁移后 (Masonry)
+[view mas_makeConstraints:^(MASConstraintMaker *make) {
+    make.left.equalTo(superview).offset(10);
+    // ... 更多约束
+}];</code></pre></div>
+<h3>与其他框架共存</h3>
+<div class="code-block"><pre><code class="language-objective-c">// Masonry + SnapKit (混合项目)
+// Objective-C部分
+[view mas_makeConstraints:^(MASConstraintMaker *make) {
+    make.left.equalTo(superview).offset(10);
+}];
+
+// Swift部分
+view.snp.makeConstraints { make in
+    make.right.equalToSuperview().offset(-10)
+}</code></pre></div>
+<ul>
+<li>✅ 两者可以共存，互不干扰</li>
+<li>⚠️ 避免在同一视图上混用</li>
+<li>✅ 团队统一使用一种框架</li>
+<p><strong>注意事项</strong>：</p></ul>
+<hr>
+<h2>🚀 未来发展趋势</h2>
+<h3>1. SwiftUI 时代的挑战</h3>
+<div class="mermaid">
+flowchart TD
+    A["传统Auto Layout"] --> B[Masonry]
+    A --> C["原生API"]
+
+    D[SwiftUI] --> E["声明式UI"]
+    D --> F["自动布局"]
+
+    B --> G{"未来趋势"}
+    C --> G
+    E --> H["主流方向"]
+
+    G -->|新项目| H
+    G -->|老项目| I["继续使用Masonry"]</div>
+<ul>
+<li>✅ <strong>SwiftUI</strong>: 未来主流，但目前仅支持iOS 13+</li>
+<li>✅ <strong>UIKit</strong>: 仍是最广泛使用的框架</li>
+<li>✅ <strong>Masonry</strong>: 在UIKit生态中仍有重要地位</li>
+<p><strong>现状分析</strong>：</p></ul>
+<p><strong>使用建议</strong>：</p>
+<div class="code-block"><pre><code class="language-objective-c">// 新项目 (iOS 13+)
+// 推荐：SwiftUI
+
+// 老项目或需要兼容旧系统
+// 推荐：Masonry + UIKit
+
+// 混合项目
+// 推荐：SwiftUI + Masonry (UIKit部分)</code></pre></div>
+<h3>2. 新架构适配</h3>
+<p><strong>MVVM/MVI 架构</strong>：</p>
+<div class="code-block"><pre><code class="language-objective-c">// ViewModel中定义约束配置
+@interface MyViewModel : NSObject
+@property (nonatomic, strong) NSArray *constraints;
+@end
+
+@implementation MyViewModel
+
+- (NSArray *)makeConstraintsForView:(UIView *)view inSuperview:(UIView *)superview {
+    return [view mas_makeConstraints:^(MASConstraintMaker *make) {
+        make.edges.equalTo(superview);
+    }];
+}
+
+@end</code></pre></div>
+<p><strong>组件化架构</strong>：</p>
+<div class="code-block"><pre><code class="language-objective-c">// 独立组件使用Masonry
+@interface CustomButton : UIButton
+- (void)setupConstraints;
+@end
+
+@implementation CustomButton
+
+- (void)setupConstraints {
+    [self mas_makeConstraints:^(MASConstraintMaker *make) {
+        make.size.mas_equalTo(CGSizeMake(100, 44));
+    }];
+}
+
+@end</code></pre></div>
+<h3>3. 性能优化方向</h3>
+<div class="mermaid">
+graph TD
+    A["当前性能"] --> B["优秀"]
+    B --> C["优化方向"]
+
+    C --> D["批量操作"]
+    C --> E["惰性加载"]
+    C --> F["缓存机制"]
+
+    D --> G["减少遍历"]
+    E --> H["按需创建"]
+    F --> I["复用约束"]</div>
+<ul>
+<li>🚀 <strong>约束缓存</strong>: 复用已创建的约束对象</li>
+<li>🚀 <strong>批量更新</strong>: 一次layoutIfNeeded处理多个更新</li>
+<li>🚀 <strong>异步计算</strong>: 复杂约束计算放到后台线程</li>
+<p><strong>潜在改进</strong>：</p></ul>
+<h3>4. 兼容性演进</h3>
+<div class="mermaid">
+timeline
+    title 兼容性演进
+    2013 : iOS 6+ / macOS 10.7+
+    2015 : iOS 8+ / macOS 10.10+
+    2017 : iOS 9+ / macOS 10.12+
+    2020 : iOS 11+ / macOS 10.14+
+    2023 : iOS 12+ / macOS 10.15+</div>
+<ul>
+<li>✅ 支持visionOS</li>
+<li>✅ 更好的Swift兼容</li>
+<li>✅ 安全区域增强</li>
+<li>✅ 动态类型支持</li>
+<p><strong>未来可能</strong>：</p></ul>
+<hr>
+<h2>📊 选择决策树</h2>
+<div class="mermaid">
+flowchart TD
+    A["开始选择"] --> B{"项目语言?"}
+
+    B -->|Objective-C| C{"项目状态?"}
+    B -->|Swift| D{"使用SnapKit"}
+
+    C -->|新项目| E{"目标iOS版本?"}
+    C -->|老项目| F{"继续使用Masonry"}
+
+    E -->|iOS 13+| G{"团队偏好?"}
+    E -->|iOS 12-| H{"使用Masonry"}
+
+    G -->|SwiftUI| I[SwiftUI]
+    G -->|UIKit| J[Masonry]
+
+    D --> K["完成"]
+    F --> K
+    H --> K
+    I --> K
+    J --> K</div>
+<h3>决策表</h3>
+<table>
+<thead>
+<tr><th>场景</th><th>推荐方案</th><th>理由</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>OC新项目</strong></td><td>Masonry</td><td>成熟稳定，代码简洁</td></tr><tr><td><strong>OC老项目</strong></td><td>Masonry</td><td>无缝集成，零成本迁移</td></tr><tr><td><strong>Swift新项目</strong></td><td>SwiftUI/SnapKit</td><td>现代化，类型安全</td></tr><tr><td><strong>Swift老项目</strong></td><td>SnapKit</td><td>与Masonry语法一致</td></tr><tr><td><strong>混合项目</strong></td><td>各自最佳</td><td>互不干扰，灵活选择</td></tr><tr><td><strong>性能敏感</strong></td><td>原生API</td><td>最小开销</td></tr><tr><td><strong>快速开发</strong></td><td>Masonry</td><td>开发效率最高</td></tr>
+</tbody></table>
+<hr>
+<h2>🎓 学习路径建议</h2>
+<h3>初学者</h3>
+<div class="mermaid">
+flowchart TD
+    A["基础语法"] --> B["常见场景"]
+    B --> C["调试技巧"]
+    C --> D["最佳实践"]
+
+    A --> E["阅读文档"]
+    B --> F["运行示例"]
+    C --> G["调试练习"]
+    D --> H["项目实践"]</div>
+<ol>
+<li><strong>阅读README</strong>：了解基本用法</li>
+<li><strong>运行示例</strong>：Examples目录</li>
+<li><strong>简单练习</strong>：实现基础布局</li>
+<li><strong>复杂场景</strong>：动态布局、动画</li>
+<li><strong>源码阅读</strong>：深入理解实现</li>
+<p><strong>学习步骤</strong>：</p></ol>
+<h3>进阶者</h3>
+<div class="mermaid">
+mindmap
+  root((进阶学习))
+    "源码分析"
+      "架构设计"
+      "设计模式"
+      "算法实现"
+    "性能优化"
+      "内存管理"
+      "创建效率"
+      "动画流畅"
+    "扩展开发"
+      "自定义属性"
+      "链式扩展"
+      "工具函数"</div>
+<ol>
+<li><strong>源码阅读</strong>：逐行理解实现</li>
+<li><strong>设计模式</strong>：识别并应用</li>
+<li><strong>性能调优</strong>：基准测试</li>
+<li><strong>扩展开发</strong>：自定义功能</li>
+<li><strong>贡献代码</strong>：参与社区</li>
+<p><strong>进阶路径</strong>：</p></ol>
+<hr>
+<h2>🔗 相关资源</h2>
+<h3>官方资源</h3>
+<ul>
+<li>📦 <strong>GitHub</strong>: https://github.com/SnapKit/Masonry</li>
+<li>📖 <strong>文档</strong>: README.md</li>
+<li>📝 <strong>示例</strong>: Examples/Masonry iOS Examples</li></ul>
+<h3>竞品框架</h3>
+<ul>
+<li><strong>PureLayout</strong>: https://github.com/PureLayout/PureLayout</li>
+<li><strong>SnapKit</strong>: https://github.com/SnapKit/SnapKit</li>
+<li><strong>Cartography</strong>: https://github.com/robb/Cartography (已停止维护)</li></ul>
+<h3>学习资料</h3>
+<ul>
+<li>🎞️ <strong>教程</strong>: Ray Wenderlich, NSHipster</li>
+<li>📚 <strong>书籍</strong>: iOS编程相关书籍</li>
+<li>🎤 <strong>演讲</strong>: WWDC, iOS Conf</li></ul>
+<hr>
+<h2>📋 本章要点总结</h2>
+<h3>生态现状</h3>
+<ul>
+<li>✅ <strong>成熟稳定</strong>: 经过多年验证</li>
+<li>✅ <strong>社区活跃</strong>: 广泛使用和贡献</li>
+<li>✅ <strong>竞品丰富</strong>: 多种选择</li>
+<li>✅ <strong>文档完善</strong>: 学习资源多</li></ul>
+<h3>选择建议</h3>
+<ul>
+<li><strong>Objective-C</strong>: 首选Masonry</li>
+<li><strong>Swift</strong>: 首选SnapKit</li>
+<li><strong>新项目</strong>: 考虑SwiftUI</li>
+<li><strong>老项目</strong>: 继续使用Masonry</li></ul>
+<h3>未来展望</h3>
+<ul>
+<li><strong>短期</strong>: UIKit生态仍占主导</li>
+<li><strong>中期</strong>: SwiftUI逐步普及</li>
+<li><strong>长期</strong>: 可能被SwiftUI取代</li>
+<li><strong>现在</strong>: Masonry仍是最佳选择之一</li></ul>
+<h3>学习价值</h3>
+<ul>
+<li>✅ 掌握Auto Layout精髓</li>
+<li>✅ 学习API设计技巧</li>
+<li>✅ 理解架构设计思想</li>
+<li>✅ 培养代码质量意识</li></ul>
+<hr>
+<p><strong>上一章</strong>：<a href="07_源码深度解析.html">07_源码深度解析</a></p>
+<p><strong>返回目录</strong>：<a href="../index.html">README</a></p>
+
+            <div class="chapter-nav">
+                <a href="../index.html">🏠 首页</a>
+                <a href="#" onclick="history.back(); return false;">← 返回上一页</a>
+            </div>
+        </article>
+    </main>
+
+    <div class="toolbar">
+        <button onclick="scrollToTop()" title="滚动到顶部">↑</button>
+        <button onclick="toggleTOC()" title="切换目录">📑</button>
+        <button onclick="backToIndex()" title="返回首页">🏠</button>
+    </div>
+</body>
+</html>
